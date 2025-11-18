@@ -19,7 +19,7 @@
 
   Provider architecture:
     Additional log targets can be added by using provider units:
-    uses DX.Logger.Provider.File;  // Adds file logging
+    uses DX.Logger.Provider.TextFile;  // Adds file logging
 }
 
 interface
@@ -66,11 +66,12 @@ type
   private
     class var FInstance: TDXLogger;
     class var FMinLevel: TLogLevel;
+    class var FLock: TObject;
   private
     FProviders: TList<ILogProvider>;
-    FCriticalSection: TObject;
 
     constructor Create;
+    class constructor Create;
     class destructor Destroy;
   public
     destructor Destroy; override;
@@ -199,7 +200,6 @@ constructor TDXLogger.Create;
 begin
   inherited Create;
   FProviders := TList<ILogProvider>.Create;
-  FCriticalSection := TCriticalSection.Create;
 
   // Register default platform-specific provider
   RegisterProvider(TDefaultLogProvider.Create);
@@ -207,7 +207,6 @@ end;
 
 destructor TDXLogger.Destroy;
 begin
-  FreeAndNil(FCriticalSection);
   FreeAndNil(FProviders);
   inherited;
 end;
@@ -215,12 +214,21 @@ end;
 class destructor TDXLogger.Destroy;
 begin
   FreeAndNil(FInstance);
+  FreeAndNil(FLock);
 end;
 
 class function TDXLogger.Instance: TDXLogger;
 begin
   if not Assigned(FInstance) then
-    FInstance := TDXLogger.Create;
+  begin
+    TMonitor.Enter(FLock);
+    try
+      if not Assigned(FInstance) then  // Double-checked locking
+        FInstance := TDXLogger.Create;
+    finally
+      TMonitor.Exit(FLock);
+    end;
+  end;
   Result := FInstance;
 end;
 
@@ -231,22 +239,22 @@ end;
 
 procedure TDXLogger.RegisterProvider(const AProvider: ILogProvider);
 begin
-  TMonitor.Enter(FCriticalSection);
+  TMonitor.Enter(Self);
   try
     if not FProviders.Contains(AProvider) then
       FProviders.Add(AProvider);
   finally
-    TMonitor.Exit(FCriticalSection);
+    TMonitor.Exit(Self);
   end;
 end;
 
 procedure TDXLogger.UnregisterProvider(const AProvider: ILogProvider);
 begin
-  TMonitor.Enter(FCriticalSection);
+  TMonitor.Enter(Self);
   try
     FProviders.Remove(AProvider);
   finally
-    TMonitor.Exit(FCriticalSection);
+    TMonitor.Exit(Self);
   end;
 end;
 
@@ -264,12 +272,12 @@ begin
   LEntry.Message := AMessage;
   LEntry.ThreadID := TThread.CurrentThread.ThreadID;
 
-  TMonitor.Enter(FCriticalSection);
+  TMonitor.Enter(Self);
   try
     for LProvider in FProviders do
       LProvider.Log(LEntry);
   finally
-    TMonitor.Exit(FCriticalSection);
+    TMonitor.Exit(Self);
   end;
 end;
 
@@ -318,7 +326,10 @@ begin
   end;
 end;
 
-initialization
-  TDXLogger.FMinLevel := TLogLevel.Trace; // Default: log everything
+class constructor TDXLogger.Create;
+begin
+  FMinLevel := TLogLevel.Trace; // Default: log everything
+  FLock := TObject.Create;
+end;
 
 end.
