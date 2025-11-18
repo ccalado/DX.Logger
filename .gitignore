@@ -82,3 +82,7 @@ test-results.xml
 config.local.ini
 *.local.ini
 .env.local
+
+# Test results
+dunitx-results.xml
+*.dunitx-results.xml
