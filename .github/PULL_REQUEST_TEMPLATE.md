@@ -1,0 +1,47 @@
+# Pull Request
+
+## Description
+Please include a summary of the changes and which issue is fixed. Include relevant motivation and context.
+
+Fixes # (issue)
+
+## Type of Change
+Please delete options that are not relevant.
+
+- [ ] Bug fix (non-breaking change which fixes an issue)
+- [ ] New feature (non-breaking change which adds functionality)
+- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- [ ] Documentation update
+- [ ] Code refactoring
+- [ ] Performance improvement
+
+## How Has This Been Tested?
+Please describe the tests that you ran to verify your changes.
+
+- [ ] Unit tests pass
+- [ ] Manual testing performed
+- [ ] Tested on multiple platforms (specify which)
+
+**Test Configuration**:
+- Delphi Version:
+- Platform(s):
+- Test scenarios:
+
+## Checklist
+- [ ] My code follows the [Delphi Style Guide](../docs/Delphi%20Style%20Guide%20EN.md)
+- [ ] I have performed a self-review of my own code
+- [ ] I have commented my code, particularly in hard-to-understand areas
+- [ ] I have made corresponding changes to the documentation
+- [ ] My changes generate no new warnings
+- [ ] I have added tests that prove my fix is effective or that my feature works
+- [ ] New and existing unit tests pass locally with my changes
+- [ ] All files use UTF-8 with BOM encoding
+- [ ] Line endings are CRLF
+- [ ] No sensitive data (API keys, passwords) is included
+
+## Screenshots (if applicable)
+Add screenshots to help explain your changes.
+
+## Additional Notes
+Add any other notes about the pull request here.
+
