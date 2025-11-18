@@ -16,8 +16,10 @@ uses
   DUnitX.TestFramework,
   DX.Logger in '..\source\DX.Logger.pas',
   DX.Logger.Provider.TextFile in '..\source\DX.Logger.Provider.TextFile.pas',
+  DX.Logger.Provider.Seq in '..\source\DX.Logger.Provider.Seq.pas',
   DX.Logger.Tests.Core in 'DX.Logger.Tests.Core.pas',
-  DX.Logger.Tests.FileProvider in 'DX.Logger.Tests.FileProvider.pas';
+  DX.Logger.Tests.FileProvider in 'DX.Logger.Tests.FileProvider.pas',
+  DX.Logger.Tests.SeqProvider in 'DX.Logger.Tests.SeqProvider.pas';
 
 {$IFNDEF TESTINSIGHT}
 var
