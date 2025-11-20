@@ -156,12 +156,16 @@ var
   LBackupFileName: string;
   LFileSize: Int64;
   LCounter: Integer;
+  LSearchRec: TSearchRec;
 begin
-  // Check if file exists and get its size
-  if not TFile.Exists(FLogFileName) then
+  // Check if file exists and get its size (Delphi 10 compatible)
+  if FindFirst(FLogFileName, faAnyFile, LSearchRec) <> 0 then
     Exit;
-
-  LFileSize := TFile.GetSize(FLogFileName);
+  try
+    LFileSize := LSearchRec.Size;
+  finally
+    FindClose(LSearchRec);
+  end;
 
   // Check if rotation is needed
   if LFileSize >= FMaxFileSize then
