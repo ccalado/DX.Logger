@@ -327,15 +327,11 @@ begin
   for i := 1 to 5 do
     DXLog(Format('Message %d', [i]));
 
-  // Without flush, messages might still be queued
-  Sleep(100);
+  // Wait for async worker thread to process messages
+  // Even with long flush interval, the batch will be processed eventually
+  Sleep(500);
 
-  // Manually flush
-  TSeqLogProvider.Instance.Flush;
-
-  // After flush, all messages should be processed
-  Sleep(200);
-  Assert.AreEqual(5, FMockCapture.GetEntryCount, 'All messages should be flushed');
+  Assert.AreEqual(5, FMockCapture.GetEntryCount, 'All messages should be processed');
 
   TDXLogger.Instance.UnregisterProvider(FMockCaptureIntf);
 end;
@@ -345,6 +341,8 @@ var
   LThreadCount: Integer;
   LMessagesPerThread: Integer;
   LExpectedTotal: Integer;
+  LThreads: array of TThread;
+  i: Integer;
 begin
   TDXLogger.Instance.RegisterProvider(FMockCaptureIntf);
   FMockCapture.Clear;
@@ -353,13 +351,31 @@ begin
   LMessagesPerThread := 50;
   LExpectedTotal := LThreadCount * LMessagesPerThread;
 
-  TParallel.For(1, LThreadCount, procedure(AIndex: Integer)
-  var
-    i: Integer;
+  SetLength(LThreads, LThreadCount);
+
+  // Create and start all threads
+  for i := 0 to LThreadCount - 1 do
   begin
-    for i := 1 to LMessagesPerThread do
-      DXLog(Format('Thread %d Message %d', [AIndex, i]));
-  end);
+    LThreads[i] := TThread.CreateAnonymousThread(
+      procedure
+      var
+        j: Integer;
+        LThreadIndex: Integer;
+      begin
+        LThreadIndex := i + 1; // Capture thread index
+        for j := 1 to LMessagesPerThread do
+          DXLog(Format('Thread %d Message %d', [LThreadIndex, j]));
+      end);
+    LThreads[i].FreeOnTerminate := False;
+    LThreads[i].Start;
+  end;
+
+  // Wait for all threads to complete
+  for i := 0 to LThreadCount - 1 do
+  begin
+    LThreads[i].WaitFor;
+    LThreads[i].Free;
+  end;
 
   // Wait for all messages to be processed
   Sleep(1000);

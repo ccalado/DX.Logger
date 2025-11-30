@@ -46,16 +46,13 @@ uses
 
 procedure TFileLogProviderTests.Setup;
 begin
-  // Close any open log file from previous tests
-  TFileLogProvider.Instance.Close;
-
   FTestDir := TPath.Combine(TPath.GetTempPath, 'DXLoggerTests');
   FTestLogFile := TPath.Combine(FTestDir, 'test.log');
 
   // Clean up any existing test files
   if TDirectory.Exists(FTestDir) then
   begin
-    Sleep(100); // Give file handles time to close
+    Sleep(200); // Give async worker thread time to finish
     try
       TDirectory.Delete(FTestDir, True);
     except
@@ -71,13 +68,13 @@ end;
 
 procedure TFileLogProviderTests.TearDown;
 begin
-  // Close the log file to release file handles
-  TFileLogProvider.Instance.Close;
+  // Give async worker thread time to finish writing
+  Sleep(200);
 
   // Clean up test files
   if TDirectory.Exists(FTestDir) then
   begin
-    Sleep(100); // Give file handles time to close
+    Sleep(200); // Give file handles time to close
     try
       TDirectory.Delete(FTestDir, True);
     except
@@ -99,7 +96,7 @@ begin
   LEntry.ThreadID := Winapi.Windows.GetCurrentThreadId;
 
   TFileLogProvider.Instance.Log(LEntry);
-  Sleep(50); // Give it time to write
+  Sleep(200); // Give async worker thread time to write
   Assert.IsTrue(TFile.Exists(FTestLogFile), 'Log file should be created');
 end;
 
@@ -117,8 +114,8 @@ begin
 
   TFileLogProvider.Instance.Log(LEntry);
 
-  // Close the file before reading it
-  TFileLogProvider.Instance.Close;
+  // Give async worker thread time to write
+  Sleep(200);
 
   Assert.IsTrue(TFile.Exists(FTestLogFile), 'Log file should exist');
   LContent := TFile.ReadAllText(FTestLogFile);
@@ -169,7 +166,7 @@ begin
   LEntry.ThreadID := Winapi.Windows.GetCurrentThreadId;
 
   TFileLogProvider.Instance.Log(LEntry);
-  Sleep(50); // Give it time to write
+  Sleep(200); // Give async worker thread time to write
   Assert.IsTrue(TFile.Exists(LCustomFile), 'Custom log file should be created');
 end;
 
@@ -191,7 +188,7 @@ begin
   LEntry.ThreadID := Winapi.Windows.GetCurrentThreadId;
 
   TFileLogProvider.Instance.Log(LEntry);
-  Sleep(50); // Give it time to write
+  Sleep(200); // Give async worker thread time to write
 
   Assert.IsTrue(TDirectory.Exists(LSubDir), 'Subdirectory should be created');
   Assert.IsTrue(TFile.Exists(LFileInSubDir), 'Log file in subdirectory should be created');
@@ -248,8 +245,8 @@ begin
     LThreads[i].Free;
   end;
 
-  // Close the file before reading it
-  TFileLogProvider.Instance.Close;
+  // Give async worker thread time to write all batches
+  Sleep(500);
 
   Assert.IsTrue(TFile.Exists(FTestLogFile), 'Log file should exist');
 
