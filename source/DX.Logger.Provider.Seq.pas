@@ -14,6 +14,7 @@ unit DX.Logger.Provider.Seq;
     // Configure and register Seq provider
     TSeqLogProvider.SetServerUrl('https://your-seq-server.example.com');
     TSeqLogProvider.SetApiKey('your-api-key-here');
+    TSeqLogProvider.SetSource('MyApplication'); // Optional, defaults to EXE name
     TDXLogger.Instance.RegisterProvider(TSeqLogProvider.Instance);
 
   Features:
@@ -40,6 +41,7 @@ type
     class var FInstance: TSeqLogProvider;
     class var FServerUrl: string;
     class var FApiKey: string;
+    class var FSource: string;
     class var FBatchSize: Integer;
     class var FFlushInterval: Integer;
     class var FLock: TObject;
@@ -70,6 +72,11 @@ type
     /// Set Seq API key for authentication
     /// </summary>
     class procedure SetApiKey(const AKey: string);
+
+    /// <summary>
+    /// Set source identifier (default: application EXE name)
+    /// </summary>
+    class procedure SetSource(const ASource: string);
 
     /// <summary>
     /// Set batch size (default: 10)
@@ -187,6 +194,16 @@ begin
   end;
 end;
 
+class procedure TSeqLogProvider.SetSource(const ASource: string);
+begin
+  TMonitor.Enter(FLock);
+  try
+    FSource := ASource;
+  finally
+    TMonitor.Exit(FLock);
+  end;
+end;
+
 class procedure TSeqLogProvider.SetBatchSize(ASize: Integer);
 begin
   TMonitor.Enter(FLock);
@@ -251,10 +268,19 @@ function TSeqLogProvider.FormatCLEF(const AEntry: TLogEntry): string;
 var
   LJson: TJSONObject;
   LTimestamp: string;
+  LSource: string;
 begin
   // Format timestamp as ISO 8601
   LTimestamp := FormatDateTime('yyyy-mm-dd"T"hh:nn:ss.zzz"Z"',
     TTimeZone.Local.ToUniversalTime(AEntry.Timestamp));
+
+  // Get source (thread-safe)
+  TMonitor.Enter(FLock);
+  try
+    LSource := FSource;
+  finally
+    TMonitor.Exit(FLock);
+  end;
 
   LJson := TJSONObject.Create;
   try
@@ -262,6 +288,10 @@ begin
     LJson.AddPair('@l', LogLevelToSeqLevel(AEntry.Level));
     LJson.AddPair('@m', AEntry.Message);
     LJson.AddPair('ThreadId', TJSONNumber.Create(AEntry.ThreadID));
+
+    // Add source if configured
+    if LSource <> '' then
+      LJson.AddPair('source', LSource);
 
     Result := LJson.ToJSON;
   finally
@@ -381,6 +411,7 @@ initialization
   TSeqLogProvider.FFlushInterval := C_DEFAULT_FLUSH_INTERVAL;
   TSeqLogProvider.FServerUrl := '';
   TSeqLogProvider.FApiKey := '';
+  TSeqLogProvider.FSource := ChangeFileExt(ExtractFileName(ParamStr(0)), '');
 
 end.
 
