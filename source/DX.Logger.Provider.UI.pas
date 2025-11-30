@@ -111,22 +111,37 @@ end;
 destructor TUILogProvider.Destroy;
 begin
   FShutdown := True;
-  
+
+  // Disconnect from external strings first to prevent UI updates during shutdown
+  FExternalStrings := nil;
+
   // Wait for worker thread to finish
   if Assigned(FWorkerThread) then
   begin
     FWorkerThread.Terminate;
-    FWorkerThread.WaitFor;
-    FreeAndNil(FWorkerThread);
+
+    // Don't wait too long during shutdown
+    if FWorkerThread.WaitFor(1000) <> TWaitResult.wrSignaled then
+    begin
+      // Force terminate if thread doesn't respond
+      FWorkerThread.FreeOnTerminate := True;
+      FWorkerThread := nil;
+    end
+    else
+    begin
+      FreeAndNil(FWorkerThread);
+    end;
   end;
-  
+
   FreeAndNil(FPendingMessages);
   inherited;
 end;
 
 class destructor TUILogProvider.Destroy;
 begin
-  FreeAndNil(FInstance);
+  // During shutdown, just set to nil without freeing
+  // The instance will be freed by the reference counting
+  FInstance := nil;
   FreeAndNil(FLock);
 end;
 
@@ -134,6 +149,9 @@ class function TUILogProvider.Instance: TUILogProvider;
 begin
   if not Assigned(FInstance) then
   begin
+    if not Assigned(FLock) then
+      FLock := TObject.Create;
+
     TMonitor.Enter(FLock);
     try
       if not Assigned(FInstance) then  // Double-checked locking
@@ -211,13 +229,17 @@ end;
 
 procedure TUILogProvider.UpdateExternalStrings(const AMessages: TArray<string>);
 begin
+  // Skip if shutting down or no external strings
+  if FShutdown or not Assigned(FExternalStrings) then
+    Exit;
+
   // Queue to main thread for UI update
   TThread.Queue(nil,
     procedure
     var
       LMessage: string;
     begin
-      if not Assigned(FExternalStrings) then
+      if FShutdown or not Assigned(FExternalStrings) then
         Exit;
 
       try
