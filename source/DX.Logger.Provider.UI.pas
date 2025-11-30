@@ -2,23 +2,23 @@ unit DX.Logger.Provider.UI;
 
 {
   DX.Logger.Provider.UI - UI logging provider for DX.Logger
-  
+
   Copyright (c) 2025 Olaf Monien
   SPDX-License-Identifier: MIT
-  
+
   Simple usage:
     uses
       DX.Logger,
       DX.Logger.Provider.UI;
-    
+
     // Register UI provider with TMemo.Lines
     TUILogProvider.Instance.ExternalStrings := MemoInfo.Lines;
     TUILogProvider.Instance.AppendOnTop := False;
     TDXLogger.Instance.RegisterProvider(TUILogProvider.Instance);
-    
+
     // Unregister when form closes
     TUILogProvider.Instance.ExternalStrings := nil;
-  
+
   Features:
     - Thread-safe logging to TStrings (TMemo.Lines, etc.)
     - Synchronization to main thread via TThread.Queue
@@ -48,34 +48,34 @@ type
     FPendingMessages: TThreadedQueue<string>;
     FWorkerThread: TThread;
     FShutdown: Boolean;
-    
+
     procedure WorkerThreadExecute;
     procedure UpdateExternalStrings(const AMessages: TArray<string>);
     function FormatLogEntry(const AEntry: TLogEntry): string;
   public
     constructor Create;
     destructor Destroy; override;
-    
+
     /// <summary>
     /// Log message to UI (queued for async processing)
     /// </summary>
     procedure Log(const AEntry: TLogEntry);
-    
+
     /// <summary>
     /// Set external strings (e.g., TMemo.Lines) to log to
     /// </summary>
     property ExternalStrings: TStrings read FExternalStrings write FExternalStrings;
-    
+
     /// <summary>
     /// Insert new log messages on top (default: False)
     /// </summary>
     property AppendOnTop: Boolean read FAppendOnTop write FAppendOnTop;
-    
+
     /// <summary>
     /// Get singleton instance
     /// </summary>
     class function Instance: TUILogProvider;
-    
+
     /// <summary>
     /// Cleanup on application exit
     /// </summary>
@@ -101,7 +101,7 @@ begin
   FAppendOnTop := False;
   FExternalStrings := nil;
   FPendingMessages := TThreadedQueue<string>.Create(C_QUEUE_DEPTH, INFINITE, 100);
-  
+
   // Start worker thread
   FWorkerThread := TThread.CreateAnonymousThread(WorkerThreadExecute);
   FWorkerThread.FreeOnTerminate := False;
@@ -119,18 +119,8 @@ begin
   if Assigned(FWorkerThread) then
   begin
     FWorkerThread.Terminate;
-
-    // Don't wait too long during shutdown
-    if FWorkerThread.WaitFor(1000) <> TWaitResult.wrSignaled then
-    begin
-      // Force terminate if thread doesn't respond
-      FWorkerThread.FreeOnTerminate := True;
-      FWorkerThread := nil;
-    end
-    else
-    begin
-      FreeAndNil(FWorkerThread);
-    end;
+    FWorkerThread.WaitFor;
+    FreeAndNil(FWorkerThread);
   end;
 
   FreeAndNil(FPendingMessages);
@@ -170,7 +160,7 @@ begin
   // Skip if no external strings assigned
   if not Assigned(FExternalStrings) then
     Exit;
-    
+
   LFormattedMessage := FormatLogEntry(AEntry);
   FPendingMessages.PushItem(LFormattedMessage);
 end;
@@ -233,8 +223,8 @@ begin
   if FShutdown or not Assigned(FExternalStrings) then
     Exit;
 
-  // Queue to main thread for UI update
-  TThread.Queue(nil,
+  // Synchronize to main thread for UI update
+  TThread.Synchronize(nil,
     procedure
     var
       LMessage: string;
