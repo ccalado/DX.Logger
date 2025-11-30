@@ -30,13 +30,14 @@ uses
   System.SysUtils,
   System.Classes,
   System.Generics.Collections,
-  DX.Logger;
+  DX.Logger,
+  DX.Logger.Provider.Async;
 
 type
   /// <summary>
   /// Seq-based log provider with asynchronous batching
   /// </summary>
-  TSeqLogProvider = class(TInterfacedObject, ILogProvider)
+  TSeqLogProvider = class(TAsyncLogProvider)
   private
     class var FInstance: TSeqLogProvider;
     class var FServerUrl: string;
@@ -46,22 +47,27 @@ type
     class var FFlushInterval: Integer;
     class var FLock: TObject;
   private
-    FEventQueue: TThreadedQueue<TLogEntry>;
-    FWorkerThread: TThread;
-    FShutdown: Boolean;
-
-    procedure WorkerThreadExecute;
     procedure SendBatch(const ABatch: TArray<TLogEntry>);
     function LogLevelToSeqLevel(ALevel: TLogLevel): string;
     function FormatCLEF(const AEntry: TLogEntry): string;
+  protected
+    /// <summary>
+    /// Write batch of log entries to Seq
+    /// </summary>
+    procedure WriteBatch(const AEntries: TArray<TLogEntry>); override;
+
+    /// <summary>
+    /// Override batch size from configuration
+    /// </summary>
+    function GetBatchSize: Integer; override;
+
+    /// <summary>
+    /// Override flush interval from configuration
+    /// </summary>
+    function GetFlushInterval: Integer; override;
   public
     constructor Create;
     destructor Destroy; override;
-
-    /// <summary>
-    /// Log message to Seq (queued for async processing)
-    /// </summary>
-    procedure Log(const AEntry: TLogEntry);
 
     /// <summary>
     /// Set Seq server URL (e.g., 'https://seqsrv1.esculenta.at')
@@ -94,11 +100,6 @@ type
     class function Instance: TSeqLogProvider;
 
     /// <summary>
-    /// Flush all pending log entries immediately
-    /// </summary>
-    procedure Flush;
-
-    /// <summary>
     /// Cleanup on application exit
     /// </summary>
     class destructor Destroy;
@@ -122,47 +123,28 @@ const
 constructor TSeqLogProvider.Create;
 begin
   inherited Create;
-  FShutdown := False;
-  FEventQueue := TThreadedQueue<TLogEntry>.Create(C_QUEUE_DEPTH, INFINITE, 100);
-
-  // Start worker thread
-  FWorkerThread := TThread.CreateAnonymousThread(WorkerThreadExecute);
-  FWorkerThread.FreeOnTerminate := False;
-  FWorkerThread.Start;
 end;
 
 destructor TSeqLogProvider.Destroy;
 begin
-  // Signal shutdown
-  FShutdown := True;
-
-  // Close queue to unblock worker thread
-  if Assigned(FEventQueue) then
-    FEventQueue.DoShutDown;
-
-  // Wait for worker thread to finish
-  if Assigned(FWorkerThread) then
-  begin
-    FWorkerThread.WaitFor;
-    FreeAndNil(FWorkerThread);
-  end;
-
-  FreeAndNil(FEventQueue);
   inherited;
 end;
 
 class destructor TSeqLogProvider.Destroy;
 begin
-  // Don't free instance here - let it be freed naturally
-  // This prevents access violations during shutdown
-  FLock.Free;
-  FLock := nil;
+  // During shutdown, just set to nil without freeing
+  // The instance will be freed by the reference counting
+  FInstance := nil;
+  FreeAndNil(FLock);
 end;
 
 class function TSeqLogProvider.Instance: TSeqLogProvider;
 begin
   if not Assigned(FInstance) then
   begin
+    if not Assigned(FLock) then
+      FLock := TObject.Create;
+
     TMonitor.Enter(FLock);
     try
       if not Assigned(FInstance) then  // Double-checked locking
@@ -176,6 +158,9 @@ end;
 
 class procedure TSeqLogProvider.SetServerUrl(const AUrl: string);
 begin
+  if not Assigned(FLock) then
+    FLock := TObject.Create;
+
   TMonitor.Enter(FLock);
   try
     FServerUrl := AUrl;
@@ -186,6 +171,9 @@ end;
 
 class procedure TSeqLogProvider.SetApiKey(const AKey: string);
 begin
+  if not Assigned(FLock) then
+    FLock := TObject.Create;
+
   TMonitor.Enter(FLock);
   try
     FApiKey := AKey;
@@ -196,6 +184,9 @@ end;
 
 class procedure TSeqLogProvider.SetSource(const ASource: string);
 begin
+  if not Assigned(FLock) then
+    FLock := TObject.Create;
+
   TMonitor.Enter(FLock);
   try
     FSource := ASource;
@@ -206,6 +197,9 @@ end;
 
 class procedure TSeqLogProvider.SetBatchSize(ASize: Integer);
 begin
+  if not Assigned(FLock) then
+    FLock := TObject.Create;
+
   TMonitor.Enter(FLock);
   try
     if ASize > 0 then
@@ -217,6 +211,9 @@ end;
 
 class procedure TSeqLogProvider.SetFlushInterval(AInterval: Integer);
 begin
+  if not Assigned(FLock) then
+    FLock := TObject.Create;
+
   TMonitor.Enter(FLock);
   try
     if AInterval > 0 then
@@ -226,29 +223,36 @@ begin
   end;
 end;
 
-procedure TSeqLogProvider.Log(const AEntry: TLogEntry);
+function TSeqLogProvider.GetBatchSize: Integer;
 begin
-  // Queue the entry for async processing
-  FEventQueue.PushItem(AEntry);
+  if not Assigned(FLock) then
+    FLock := TObject.Create;
+
+  TMonitor.Enter(FLock);
+  try
+    Result := FBatchSize;
+  finally
+    TMonitor.Exit(FLock);
+  end;
 end;
 
-procedure TSeqLogProvider.Flush;
-var
-  LBatch: TList<TLogEntry>;
-  LEntry: TLogEntry;
+function TSeqLogProvider.GetFlushInterval: Integer;
 begin
-  LBatch := TList<TLogEntry>.Create;
-  try
-    // Drain the queue
-    while FEventQueue.PopItem(LEntry) = TWaitResult.wrSignaled do
-      LBatch.Add(LEntry);
+  if not Assigned(FLock) then
+    FLock := TObject.Create;
 
-    // Send if we have entries
-    if LBatch.Count > 0 then
-      SendBatch(LBatch.ToArray);
+  TMonitor.Enter(FLock);
+  try
+    Result := FFlushInterval;
   finally
-    LBatch.Free;
+    TMonitor.Exit(FLock);
   end;
+end;
+
+procedure TSeqLogProvider.WriteBatch(const AEntries: TArray<TLogEntry>);
+begin
+  // Send batch to Seq server
+  SendBatch(AEntries);
 end;
 
 function TSeqLogProvider.LogLevelToSeqLevel(ALevel: TLogLevel): string;
@@ -275,6 +279,9 @@ begin
     TTimeZone.Local.ToUniversalTime(AEntry.Timestamp));
 
   // Get source (thread-safe)
+  if not Assigned(FLock) then
+    FLock := TObject.Create;
+
   TMonitor.Enter(FLock);
   try
     LSource := FSource;
@@ -296,57 +303,6 @@ begin
     Result := LJson.ToJSON;
   finally
     LJson.Free;
-  end;
-end;
-
-procedure TSeqLogProvider.WorkerThreadExecute;
-var
-  LBatch: TList<TLogEntry>;
-  LEntry: TLogEntry;
-  LLastFlush: TDateTime;
-  LWaitResult: TWaitResult;
-begin
-  LBatch := TList<TLogEntry>.Create;
-  try
-    LLastFlush := Now;
-
-    while not FShutdown do
-    begin
-      // Try to get an entry with timeout
-      LWaitResult := FEventQueue.PopItem(LEntry);
-
-      // Exit if queue was shut down
-      if LWaitResult = TWaitResult.wrAbandoned then
-        Break;
-
-      if LWaitResult = TWaitResult.wrSignaled then
-      begin
-        LBatch.Add(LEntry);
-
-        // Send batch if size reached
-        if LBatch.Count >= FBatchSize then
-        begin
-          SendBatch(LBatch.ToArray);
-          LBatch.Clear;
-          LLastFlush := Now;
-        end;
-      end;
-
-      // Send batch if flush interval elapsed
-      if (LBatch.Count > 0) and
-         (MilliSecondsBetween(Now, LLastFlush) >= FFlushInterval) then
-      begin
-        SendBatch(LBatch.ToArray);
-        LBatch.Clear;
-        LLastFlush := Now;
-      end;
-    end;
-
-    // Final flush on shutdown
-    if LBatch.Count > 0 then
-      SendBatch(LBatch.ToArray);
-  finally
-    LBatch.Free;
   end;
 end;
 
@@ -406,7 +362,6 @@ end;
 
 initialization
   // Set defaults
-  TSeqLogProvider.FLock := TObject.Create;
   TSeqLogProvider.FBatchSize := C_DEFAULT_BATCH_SIZE;
   TSeqLogProvider.FFlushInterval := C_DEFAULT_FLUSH_INTERVAL;
   TSeqLogProvider.FServerUrl := '';
